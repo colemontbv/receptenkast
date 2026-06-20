@@ -1,46 +1,51 @@
-import sqlite3
-from pathlib import Path
+import os
+import psycopg2
+import psycopg2.extras
 
-DB_PATH = Path(__file__).parent / "recepten.db"
+DATABASE_URL = os.environ["DATABASE_URL"]
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS recipes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    servings INTEGER NOT NULL DEFAULT 4,
-    tags TEXT DEFAULT '',
-    notes TEXT DEFAULT '',
-    photo TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS ingredients (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    recipe_id INTEGER NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
-    position INTEGER NOT NULL,
-    amount REAL,
-    unit TEXT DEFAULT '',
-    name TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS steps (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    recipe_id INTEGER NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
-    position INTEGER NOT NULL,
-    instruction TEXT NOT NULL
-);
-"""
+SCHEMA = [
+    """
+    CREATE TABLE IF NOT EXISTS recipes (
+        id SERIAL PRIMARY KEY,
+        title TEXT NOT NULL,
+        servings INTEGER NOT NULL DEFAULT 4,
+        tags TEXT DEFAULT '',
+        notes TEXT DEFAULT '',
+        photo TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS ingredients (
+        id SERIAL PRIMARY KEY,
+        recipe_id INTEGER NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
+        position INTEGER NOT NULL,
+        amount REAL,
+        unit TEXT DEFAULT '',
+        name TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS steps (
+        id SERIAL PRIMARY KEY,
+        recipe_id INTEGER NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
+        position INTEGER NOT NULL,
+        instruction TEXT NOT NULL
+    )
+    """,
+]
 
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
+    conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
     return conn
 
 
 def init_db():
     conn = get_db()
-    conn.executescript(SCHEMA)
-    conn.commit()
+    with conn:
+        with conn.cursor() as cur:
+            for stmt in SCHEMA:
+                cur.execute(stmt)
     conn.close()

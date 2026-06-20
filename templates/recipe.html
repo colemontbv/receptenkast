@@ -5,7 +5,7 @@
 <div class="recipe-detail">
   <div class="detail-header">
     {% if recipe['photo'] %}
-      <div class="detail-photo" style="background-image:url('{{ url_for('static', filename='uploads/' ~ recipe['photo']) }}')"></div>
+      <div class="detail-photo" style="background-image:url('{{ recipe['photo'] }}')"></div>
     {% endif %}
     <div class="detail-heading">
       {% if recipe['tags'] %}

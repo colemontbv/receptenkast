@@ -1,17 +1,22 @@
-from pathlib import Path
+import os
+import cloudinary
+import cloudinary.uploader
 
 from flask import Flask, render_template, request, redirect, url_for, flash
-from werkzeug.utils import secure_filename
 
 from database import get_db, init_db
 
-BASE_DIR = Path(__file__).parent
-UPLOAD_DIR = BASE_DIR / "static" / "uploads"
+cloudinary.config(
+    cloud_name=os.environ.get("CLOUDINARY_CLOUD_NAME"),
+    api_key=os.environ.get("CLOUDINARY_API_KEY"),
+    api_secret=os.environ.get("CLOUDINARY_API_SECRET"),
+)
+
 ALLOWED_EXT = {"png", "jpg", "jpeg", "webp", "gif"}
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = "verander-dit-naar-iets-eigens"
-app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB foto's
+app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "verander-dit")
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB
 
 init_db()
 
@@ -67,7 +72,6 @@ def parse_ingredient_line(line):
         rest = rest[1:]
     name = " ".join(rest).strip()
     if not name:
-        # niets meer over voor de naam (bv. enkel een eenheid zonder naam)
         name = unit
         unit = ""
     return (amount, unit, name)
@@ -78,42 +82,41 @@ def allowed_file(filename):
 
 
 def save_photo(file_storage):
+    """Upload naar Cloudinary; geeft de publieke URL terug."""
     if not file_storage or not file_storage.filename:
         return None
     if not allowed_file(file_storage.filename):
         flash("Ongeldig fotoformaat. Gebruik png, jpg, webp of gif.")
         return None
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    filename = secure_filename(file_storage.filename)
-    target = UPLOAD_DIR / filename
-    counter = 1
-    stem, suffix = target.stem, target.suffix
-    while target.exists():
-        target = UPLOAD_DIR / f"{stem}-{counter}{suffix}"
-        counter += 1
-    file_storage.save(target)
-    return target.name
+    result = cloudinary.uploader.upload(file_storage, folder="receptenkast")
+    return result["secure_url"]
 
 
 def load_recipe(recipe_id):
     db = get_db()
-    recipe = db.execute("SELECT * FROM recipes WHERE id = ?", (recipe_id,)).fetchone()
-    if recipe is None:
-        db.close()
-        return None, None, None
-    ingredients = db.execute(
-        "SELECT * FROM ingredients WHERE recipe_id = ? ORDER BY position", (recipe_id,)
-    ).fetchall()
-    steps = db.execute(
-        "SELECT * FROM steps WHERE recipe_id = ? ORDER BY position", (recipe_id,)
-    ).fetchall()
+    with db.cursor() as cur:
+        cur.execute("SELECT * FROM recipes WHERE id = %s", (recipe_id,))
+        recipe = cur.fetchone()
+        if recipe is None:
+            db.close()
+            return None, None, None
+        cur.execute(
+            "SELECT * FROM ingredients WHERE recipe_id = %s ORDER BY position", (recipe_id,)
+        )
+        ingredients = cur.fetchall()
+        cur.execute(
+            "SELECT * FROM steps WHERE recipe_id = %s ORDER BY position", (recipe_id,)
+        )
+        steps = cur.fetchall()
     db.close()
     return recipe, ingredients, steps
 
 
 def all_tags():
     db = get_db()
-    rows = db.execute("SELECT tags FROM recipes").fetchall()
+    with db.cursor() as cur:
+        cur.execute("SELECT tags FROM recipes")
+        rows = cur.fetchall()
     db.close()
     tag_set = set()
     for row in rows:
@@ -139,15 +142,17 @@ def index():
     """
     params = []
     if q:
-        query += " AND (r.title LIKE ? OR i.name LIKE ?)"
+        query += " AND (r.title ILIKE %s OR i.name ILIKE %s)"
         like = f"%{q}%"
         params += [like, like]
     if tag:
-        query += " AND (',' || r.tags || ',') LIKE ?"
+        query += " AND (',' || r.tags || ',') LIKE %s"
         params.append(f"%,{tag},%")
     query += " ORDER BY r.created_at DESC"
 
-    recipes = db.execute(query, params).fetchall()
+    with db.cursor() as cur:
+        cur.execute(query, params)
+        recipes = cur.fetchall()
     db.close()
     return render_template(
         "index.html", recipes=recipes, q=q, active_tag=tag, tags=all_tags()
@@ -208,46 +213,51 @@ def save_recipe(recipe_id):
         servings_int = 4
 
     db = get_db()
-    photo_filename = None
+    photo_url = None
     if recipe_id is not None:
-        existing = db.execute("SELECT photo FROM recipes WHERE id = ?", (recipe_id,)).fetchone()
-        photo_filename = existing["photo"] if existing else None
+        with db.cursor() as cur:
+            cur.execute("SELECT photo FROM recipes WHERE id = %s", (recipe_id,))
+            existing = cur.fetchone()
+        photo_url = existing["photo"] if existing else None
 
     uploaded = save_photo(request.files.get("photo"))
     if uploaded:
-        photo_filename = uploaded
+        photo_url = uploaded
     if request.form.get("remove_photo") == "1":
-        photo_filename = None
+        photo_url = None
 
-    if recipe_id is None:
-        cur = db.execute(
-            "INSERT INTO recipes (title, servings, tags, notes, photo) VALUES (?, ?, ?, ?, ?)",
-            (title, servings_int, tags, notes, photo_filename),
-        )
-        recipe_id = cur.lastrowid
-    else:
-        db.execute(
-            "UPDATE recipes SET title=?, servings=?, tags=?, notes=?, photo=? WHERE id=?",
-            (title, servings_int, tags, notes, photo_filename, recipe_id),
-        )
-        db.execute("DELETE FROM ingredients WHERE recipe_id = ?", (recipe_id,))
-        db.execute("DELETE FROM steps WHERE recipe_id = ?", (recipe_id,))
+    with db:
+        with db.cursor() as cur:
+            if recipe_id is None:
+                cur.execute(
+                    "INSERT INTO recipes (title, servings, tags, notes, photo) VALUES (%s, %s, %s, %s, %s) RETURNING id",
+                    (title, servings_int, tags, notes, photo_url),
+                )
+                recipe_id = cur.fetchone()["id"]
+            else:
+                cur.execute(
+                    "UPDATE recipes SET title=%s, servings=%s, tags=%s, notes=%s, photo=%s WHERE id=%s",
+                    (title, servings_int, tags, notes, photo_url, recipe_id),
+                )
+                cur.execute("DELETE FROM ingredients WHERE recipe_id = %s", (recipe_id,))
+                cur.execute("DELETE FROM steps WHERE recipe_id = %s", (recipe_id,))
 
-    for pos, line in enumerate(l for l in ingredients_raw.splitlines() if l.strip()):
-        amount, unit, name = parse_ingredient_line(line)
-        if name:
-            db.execute(
-                "INSERT INTO ingredients (recipe_id, position, amount, unit, name) VALUES (?, ?, ?, ?, ?)",
-                (recipe_id, pos, amount, unit, name),
-            )
+            for pos, line in enumerate(l for l in ingredients_raw.splitlines() if l.strip()):
+                parsed = parse_ingredient_line(line)
+                if parsed:
+                    amount, unit, name = parsed
+                    if name:
+                        cur.execute(
+                            "INSERT INTO ingredients (recipe_id, position, amount, unit, name) VALUES (%s, %s, %s, %s, %s)",
+                            (recipe_id, pos, amount, unit, name),
+                        )
 
-    for pos, line in enumerate(l for l in steps_raw.splitlines() if l.strip()):
-        db.execute(
-            "INSERT INTO steps (recipe_id, position, instruction) VALUES (?, ?, ?)",
-            (recipe_id, pos, line.strip()),
-        )
+            for pos, line in enumerate(l for l in steps_raw.splitlines() if l.strip()):
+                cur.execute(
+                    "INSERT INTO steps (recipe_id, position, instruction) VALUES (%s, %s, %s)",
+                    (recipe_id, pos, line.strip()),
+                )
 
-    db.commit()
     db.close()
     return redirect(url_for("view_recipe", recipe_id=recipe_id))
 
@@ -255,8 +265,9 @@ def save_recipe(recipe_id):
 @app.route("/recept/<int:recipe_id>/verwijderen", methods=["POST"])
 def delete_recipe(recipe_id):
     db = get_db()
-    db.execute("DELETE FROM recipes WHERE id = ?", (recipe_id,))
-    db.commit()
+    with db:
+        with db.cursor() as cur:
+            cur.execute("DELETE FROM recipes WHERE id = %s", (recipe_id,))
     db.close()
     flash("Recept verwijderd.")
     return redirect(url_for("index"))

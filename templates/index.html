@@ -22,7 +22,7 @@
   {% for r in recipes %}
   <a class="recipe-card" href="{{ url_for('view_recipe', recipe_id=r['id']) }}">
     {% if r['photo'] %}
-      <div class="card-photo" style="background-image:url('{{ url_for('static', filename='uploads/' ~ r['photo']) }}')"></div>
+      <div class="card-photo" style="background-image:url('{{ r['photo'] }}')"></div>
     {% else %}
       <div class="card-photo card-photo-empty">{{ r['title'][:1] | upper }}</div>
     {% endif %}
