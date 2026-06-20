@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}{{ recipe['title'] }} — Receptenkast{% endblock %}
+{% block content %}
+
+<div class="recipe-detail">
+  <div class="detail-header">
+    {% if recipe['photo'] %}
+      <div class="detail-photo" style="background-image:url('{{ url_for('static', filename='uploads/' ~ recipe['photo']) }}')"></div>
+    {% endif %}
+    <div class="detail-heading">
+      {% if recipe['tags'] %}
+      <div class="card-tags">
+        {% for t in recipe['tags'].split(',') if t.strip() %}<span>{{ t.strip() }}</span>{% endfor %}
+      </div>
+      {% endif %}
+      <h1>{{ recipe['title'] }}</h1>
+      <div class="detail-actions">
+        <a class="btn" href="{{ url_for('edit_recipe', recipe_id=recipe['id']) }}">Bewerken</a>
+        <form method="post" action="{{ url_for('delete_recipe', recipe_id=recipe['id']) }}"
+              onsubmit="return confirm('Dit recept definitief verwijderen?');">
+          <button class="btn btn-ghost" type="submit">Verwijderen</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="detail-body">
+    <section class="ingredients-col">
+      <div class="servings-control">
+        <span class="eyebrow">PORTIES</span>
+        <div class="stepper">
+          <button type="button" id="servings-minus" aria-label="Minder porties">−</button>
+          <span id="servings-value" class="mono">{{ recipe['servings'] }}</span>
+          <button type="button" id="servings-plus" aria-label="Meer porties">+</button>
+        </div>
+      </div>
+
+      <h3>Ingrediënten</h3>
+      <ul id="ingredient-list" class="ingredient-list">
+        {% for ing in ingredients %}
+        <li data-amount="{{ ing['amount'] if ing['amount'] is not none else '' }}" data-unit="{{ ing['unit'] or '' }}">
+          <span class="mono ing-amount">{{ ing['amount'] | fmt_amount }} {{ ing['unit'] }}</span>
+          <span class="ing-name">{{ ing['name'] }}</span>
+        </li>
+        {% else %}
+        <li class="muted">Nog geen ingrediënten toegevoegd.</li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    <section class="steps-col">
+      <h3>Bereiding</h3>
+      <ol class="step-list">
+        {% for s in steps %}
+        <li>{{ s['instruction'] }}</li>
+        {% else %}
+        <li class="muted">Nog geen bereidingsstappen toegevoegd.</li>
+        {% endfor %}
+      </ol>
+
+      {% if recipe['notes'] %}
+      <h3>Notities</h3>
+      <p class="notes-block">{{ recipe['notes'] }}</p>
+      {% endif %}
+    </section>
+  </div>
+</div>
+
+<script>
+  const BASE_SERVINGS = {{ recipe['servings'] }};
+  let currentServings = BASE_SERVINGS;
+  const valueEl = document.getElementById('servings-value');
+  const items = document.querySelectorAll('#ingredient-list li[data-amount]');
+
+  function formatAmount(n) {
+    if (Number.isNaN(n)) return '';
+    const rounded = Math.round(n * 100) / 100;
+    return rounded % 1 === 0 ? rounded.toString() : rounded.toFixed(2).replace(/0$/, '');
+  }
+
+  function render() {
+    valueEl.textContent = currentServings;
+    const ratio = currentServings / BASE_SERVINGS;
+    items.forEach(li => {
+      const base = parseFloat(li.dataset.amount);
+      const unit = li.dataset.unit;
+      const amountEl = li.querySelector('.ing-amount');
+      if (!isNaN(base)) {
+        amountEl.textContent = `${formatAmount(base * ratio)} ${unit}`.trim();
+      }
+    });
+  }
+
+  document.getElementById('servings-plus').addEventListener('click', () => {
+    currentServings += 1;
+    render();
+  });
+  document.getElementById('servings-minus').addEventListener('click', () => {
+    if (currentServings > 1) currentServings -= 1;
+    render();
+  });
+</script>
+{% endblock %}

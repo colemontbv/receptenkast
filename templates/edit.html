@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Recept bewerken' if recipe else 'Nieuw recept' }}{% endblock %}
+{% block content %}
+
+<form class="recipe-form" method="post" enctype="multipart/form-data">
+  <h1>{{ 'Recept bewerken' if recipe else 'Nieuw recept' }}</h1>
+
+  <label>Titel
+    <input type="text" name="title" value="{{ recipe['title'] if recipe else '' }}" required>
+  </label>
+
+  <div class="form-row">
+    <label>Porties (basis)
+      <input type="number" name="servings" min="1" value="{{ recipe['servings'] if recipe else 4 }}">
+    </label>
+    <label>Tags <span class="hint">komma-gescheiden</span>
+      <input type="text" name="tags" value="{{ (recipe['tags'].replace(',', ', ')) if recipe else '' }}" placeholder="hoofdgerecht, kip, hoog-eiwit">
+    </label>
+  </div>
+
+  <label>Foto
+    {% if recipe and recipe['photo'] %}
+      <div class="current-photo">
+        <img src="{{ url_for('static', filename='uploads/' ~ recipe['photo']) }}" alt="">
+        <label class="checkbox"><input type="checkbox" name="remove_photo" value="1"> Foto verwijderen</label>
+      </div>
+    {% endif %}
+    <input type="file" name="photo" accept="image/*">
+  </label>
+
+  <label>Ingrediënten <span class="hint">één per regel, bv. "300 g kipfilet" of "2 eieren"</span>
+    <textarea name="ingredients" rows="10" placeholder="300 g kipfilet&#10;1 el olijfolie&#10;2 tenen knoflook">{{ ingredients_text or '' }}</textarea>
+  </label>
+
+  <label>Bereiding <span class="hint">één stap per regel</span>
+    <textarea name="steps" rows="8" placeholder="Snijd de kipfilet in blokjes.&#10;Verhit de olie in een pan.">{{ steps_text or '' }}</textarea>
+  </label>
+
+  <label>Notities <span class="hint">optioneel — vrije tekst, ruwe import uit Notities, etc.</span>
+    <textarea name="notes" rows="4">{{ recipe['notes'] if recipe else '' }}</textarea>
+  </label>
+
+  <div class="form-actions">
+    <button class="btn btn-accent" type="submit">Opslaan</button>
+    {% if recipe %}
+      <a class="btn btn-ghost" href="{{ url_for('view_recipe', recipe_id=recipe['id']) }}">Annuleren</a>
+    {% else %}
+      <a class="btn btn-ghost" href="{{ url_for('index') }}">Annuleren</a>
+    {% endif %}
+  </div>
+</form>
+
+{% endblock %}
